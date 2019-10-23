@@ -30,7 +30,7 @@ public:
         fstat(fd, &s);
 
         position = s.st_size;
-        totalSize = s.st_size;
+        totalSize = s.st_size + (pageSize - s.st_size % pageSize);
         totalSize += pageSize * memPagesCount;
 
         ftruncate(fd, totalSize);
@@ -42,6 +42,8 @@ public:
     ~BinaryMmap() {
         terminate();
     }
+
+    // Write
 
     template <class String>
     void writeStr(const String str, size_t &at = ZERO, int maxLenBytes = 1) {
@@ -60,25 +62,21 @@ public:
         }
     }
 
-    void writeInt(int a, int onBytes = 4, size_t &at = ZERO) {
+    template <class Int>
+    void writeInt(Int a, int onBytes = 4, size_t &at = ZERO) {
         size_t &writeAt = (at == 0) ? position : at;
-
-        vector<uint8_t> bytes = integerToBytes(a);
 
         if (onBytes > remainingSpace())
             increaseSize();
 
-        for (int i = 0; i < onBytes - bytes.size() && bytes.size() < onBytes; ++i) {
-            map[writeAt++] = 0;
-            if (writeAt > position)
-                position = writeAt;
+        for (int i = onBytes - 1; i >= 0; --i) {
+            uint8_t byte = a & 0xFF;
+            map[writeAt + i] = byte;
+            a >>= 8;
         }
 
-        for (int j = 0; j < bytes.size() && j < onBytes; ++j) {
-            map[writeAt++] = bytes[j];
-            if (writeAt > position)
-                position = writeAt;
-        }
+        if (writeAt + onBytes > position)
+            position = writeAt + onBytes;
     }
 
     template <class Collection, class ColIterator>
@@ -86,6 +84,20 @@ public:
         for (ColIterator it = c.begin(); it != c.end(); ++it) {
             writeInt(*it, clusterSize);
         }
+    }
+
+    // Read
+
+    string_view readStr(size_t &location, int length) {
+        char *start = map + location;
+        return string_view(start, length);
+    }
+
+    size_t readInt(size_t &location, int length = 4) {
+        size_t result = 0;
+        for (int n = location; n < length + location; ++n)
+            result = (result << 8) + (uint8_t)map[n];
+        return result;
     }
 
     size_t currentPosition() {
@@ -115,25 +127,6 @@ private:
 
     size_t remainingSpace() {
         return totalSize - position;
-    }
-
-    vector<uint8_t> integerToBytes(unsigned value) {
-        vector<uint8_t> bytes;
-
-        while (value != 0) {
-            uint8_t byte = value & 0xFF;
-            bytes.insert(bytes.begin(), byte);
-            value >>= 8;
-        }
-
-        return bytes;
-    }
-
-    unsigned bytesToInt(const vector<uint8_t> &bytes) {
-        unsigned result = 0;
-        for (int n = 0; n < bytes.size(); ++n)
-            result = (result << 8) + bytes[n];
-        return result;
     }
 
 };
