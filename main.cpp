@@ -10,6 +10,9 @@
 using namespace std;
 using namespace std::chrono;
 
+const int DOC_ID_C = 2;
+const int TOTAL_COUNT_C = 3;
+
 int main() {
 
     string path;
@@ -17,6 +20,8 @@ int main() {
     size_t size;
     size_t pageSize = getpagesize();
 
+    remove("tokens.bin");
+    remove("directIndex.txt");
     BinaryMmap tokens("tokens.bin");
     ofstream directIndex("directIndex.txt", ios_base::app);
 
@@ -53,6 +58,10 @@ int main() {
         string boundary(text.substr(position, boundEnd - position));
         position = boundEnd + 1;
 
+        size_t tokensPerArticleCount = 0;
+        size_t articleOffset = tokens.currentPosition();
+        tokens.updateCurrentPosition(articleOffset + DOC_ID_C + TOTAL_COUNT_C);
+
         smatch boundMatch;
         regex_match(boundary, boundMatch, boundaryRX);
 
@@ -65,18 +74,13 @@ int main() {
         auto endIt = text.begin() + position + articleSize;
         match_results<string_view::const_iterator> wordM;
 
-        size_t tokenLocation = 0;
-
         while (regex_search(beginIt, endIt, wordM, wordRX)) {
             size_t size = wordM[0].second - wordM[0].first;
             string_view word(&*wordM[0].first, size);
 
             tokens.writeInt(word.length(), 1);
             tokens.writeStr(word);
-            tokens.writeInt(tokenLocation, 3);
-            tokens.writeInt(docId, 2);
 
-            tokenLocation += 1;
             beginIt += wordM.position() + size;
 
             bytesOfText += wordM.position() + size;
@@ -89,10 +93,17 @@ int main() {
             }
 
             tokenLength = (tokensCount * tokenLength + size) / (tokensCount + 1);
+
             tokensCount++;
+            tokensPerArticleCount++;
         }
 
         directIndex << "docId=" << docId << "|title=" << articleTitle << "|pageId=" << pageId << endl;
+
+        tokens.updateCurrentPosition(articleOffset);
+        tokens.writeInt(docId, 2);
+        tokens.writeInt(tokensPerArticleCount, 3);
+        tokens.updateCurrentPosition(tokens.writtenBytes());
 
         position += articleSize + 1;
     }
